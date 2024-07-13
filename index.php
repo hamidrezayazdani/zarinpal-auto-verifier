@@ -28,6 +28,8 @@ if ( ! function_exists( 'ywp_zpav_activation' ) ) {
 		if ( ! wp_next_scheduled( 'my_custom_cron_job' ) ) {
 			wp_schedule_event( time(), 'thirty_minutes', 'my_custom_cron_job' );
 		}
+
+		update_option( 'ywp_zpav_install_date', time() );
 	}
 
 	register_activation_hook( __FILE__, 'ywp_zpav_activation' );
@@ -69,6 +71,7 @@ if ( ! function_exists( 'ywp_zpav_cronjob_callback' ) ) {
 	 */
 	function ywp_zpav_cronjob_callback() {
 		$merchant_code = ywp_zpav_get_merchant_code();
+		$install_date  = get_option( 'ywp_zpav_install_date' );
 
 		if ( empty( $merchant_code ) ) {
 			return;
@@ -111,54 +114,60 @@ if ( ! function_exists( 'ywp_zpav_cronjob_callback' ) ) {
 			}
 
 			foreach ( $unverified_orders as $order ) {
+				$order_obj = wc_get_order( $order['order_id'] );
 
-				// Checking whether the order has already been verified or not?
-				if ( ! metadata_exists( 'post', $order['order_id'], '_ywp_zp_verified' ) ) {
-					$verify_response = wp_remote_post(
-						'https://payment.zarinpal.com/pg/v4/payment/verify.json',
-						array(
-							'method'  => 'POST',
-							'body'    => json_encode(
-								array(
-									'merchant_id' => $merchant_code,
-									'amount'      => $order['amount'],
-									'authority'   => $order['authority'],
+				if ( $order_obj && $order_obj->needs_payment() ) {
+
+					// Get the order date
+					$order_date = $order_obj->get_date_created()->getTimestamp();
+
+					// Checking whether the order has already been verified or not?
+					$already_verified = $order_obj->meta_exists( '_ywp_zp_verified' );
+
+					if ( $order_date > $install_date && ! $already_verified ) {
+						$verify_response = wp_remote_post(
+							'https://payment.zarinpal.com/pg/v4/payment/verify.json',
+							array(
+								'method'  => 'POST',
+								'body'    => json_encode(
+									array(
+										'merchant_id' => $merchant_code,
+										'amount'      => $order['amount'],
+										'authority'   => $order['authority'],
+									),
+								),
+								'headers' => array(
+									'Content-Type' => 'application/json',
+									'Accept'       => 'application/json',
 								),
 							),
-							'headers' => array(
-								'Content-Type' => 'application/json',
-								'Accept'       => 'application/json',
-							),
-						),
-					);
+						);
 
-					if ( is_wp_error( $verify_response ) ) {
-						error_log( 'Error: ' . $verify_response->get_error_message() );
+						if ( is_wp_error( $verify_response ) ) {
+							error_log( 'Error: ' . $verify_response->get_error_message() );
 
-						continue;
-					}
+							continue;
+						}
 
-					$verify_body = wp_remote_retrieve_body( $verify_response );
-					$verify_data = json_decode( $verify_body, true );
+						$verify_body = wp_remote_retrieve_body( $verify_response );
+						$verify_data = json_decode( $verify_body, true );
 
-					if ( in_array( $verify_data['data']['code'], array( 100, 101 ) ) ) {
-						$order_obj = wc_get_order( $order_id );
-
-						if ( $order_obj ) {
+						if ( in_array( $verify_data['data']['code'], array( 100, 101 ) ) ) {
 
 							// Change the order status to 'processing' with a note
 							$order_obj->update_status(
 								'processing',
 								sprintf(
-									'وضعیت سفارش توسط بازبینی خودکار تغییر کرد. - شماره پیگیری: %s',
+									'وضعیت سفارش توسط بازبینی خودکار زرین پال تغییر کرد. - شماره پیگیری: %s',
 									esc_html( $verify_data['data']['ref_id'] ),
 								),
 							);
 
-							update_post_meta( $order_id, '_ywp_zp_verified', 1 );
-							update_post_meta( $order_id, '_card_hash', $verify_data['data']['card_hash'] );
-							update_post_meta( $order_id, '_card_pan', $verify_data['data']['card_pan'] );
-							update_post_meta( $order_id, '_ref_id', $verify_data['data']['ref_id'] );
+							$order_obj->update_meta_data( '_ywp_zp_verified', 1 );
+							$order_obj->update_meta_data( '_card_hash', $verify_data['data']['card_hash'] );
+							$order_obj->update_meta_data( '_card_pan', $verify_data['data']['card_pan'] );
+							$order_obj->update_meta_data( '_ref_id', $verify_data['data']['ref_id'] );
+							$order_obj->save();
 						}
 					}
 				}
@@ -185,4 +194,21 @@ if ( ! function_exists( 'ywp_zpav_get_merchant_code' ) ) {
 
 		return '';
 	}
+}
+
+
+if ( ! function_exists( 'ywp_zpav_add_wc_hpos_compatibility' ) ) {
+
+	/**
+	 * Adds WooCommerce HPOS compatibility
+	 *
+	 * @return void
+	 */
+	function ywp_zpav_add_wc_hpos_compatibility() {
+		if ( class_exists( \Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
+			\Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__ );
+		}
+	}
+
+	add_action( 'before_woocommerce_init', 'ywp_zpav_add_wc_hpos_compatibility' );
 }
