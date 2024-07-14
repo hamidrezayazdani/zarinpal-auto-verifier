@@ -25,8 +25,8 @@ if ( ! function_exists( 'ywp_zpav_activation' ) ) {
 	 * Schedule the event on plugin activation
 	 */
 	function ywp_zpav_activation() {
-		if ( ! wp_next_scheduled( 'my_custom_cron_job' ) ) {
-			wp_schedule_event( time(), 'thirty_minutes', 'my_custom_cron_job' );
+		if ( ! wp_next_scheduled( 'ywp_zpav_cron_job' ) ) {
+			wp_schedule_event( time(), 'thirty_minutes', 'ywp_zpav_cron_job' );
 		}
 
 		update_option( 'ywp_zpav_install_date', time() );
