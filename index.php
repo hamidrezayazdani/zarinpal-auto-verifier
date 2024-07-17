@@ -158,8 +158,10 @@ if ( ! function_exists( 'ywp_zpav_cronjob_callback' ) ) {
 							$order_obj->update_status(
 								'processing',
 								sprintf(
-									'وضعیت سفارش توسط بازبینی خودکار زرین پال تغییر کرد. - شماره پیگیری: %s',
+									'✅ پرداخت موفق<br>وضعیت سفارش توسط بازبینی خودکار زرین پال تغییر کرد.<br>شماره پیگیری: %s<br>شماره کارت: %s<br>کارمزد: %s',
 									esc_html( $verify_data['data']['ref_id'] ),
+									esc_html( $verify_data['data']['card_pan'] ),
+									wc_price( $verify_data['data']['fee'] ),
 								),
 							);
 
